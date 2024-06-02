@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import json
 from geopy.distance import geodesic
 from geopy.geocoders import Nominatim
 from llama_index.core.agent import AgentRunner
@@ -8,30 +9,36 @@ from llama_index.core.tools import FunctionTool
 from openai import OpenAI as OpenAI
 from llama_index.llms.openai import OpenAI as LLMOpenAI
 
-# Load the data
+# Load the school data
 try:
     school_data = pd.read_excel('sampledata.xlsx')
     print("School data loaded successfully")
 except Exception as e:
-    print(f"Error loading data: {e}")
+    print(f"Error loading school data: {e}")
     school_data = pd.DataFrame()  # Load an empty dataframe or handle error appropriately
 
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def extract_criteria_with_gpt4(prompt):
-    response = openai_client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "Extract criteria for school selection from the given prompt."},
-            {"role": "user", "content": prompt}
-        ]
-    )
-    criteria = response.choices[0].message.content.strip()
-    
     try:
-        return eval(criteria)
+        response = openai_client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "Extract criteria for school selection from the given prompt and return it in the following JSON format: {\"max_tuition\": number, \"religious_affiliation\": boolean, \"math_sat\": number, \"reading_sat\": number, \"state\": string, \"distance\": number, \"place_distance_is_from\": string}. Ensure the output is a valid JSON object without any additional text. Use state abbreviations."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        criteria_json = response.choices[0].message.content.strip()
+        
+        try:
+            criteria = json.loads(criteria_json)
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON: {e}")
+            criteria = {}
+        
+        return criteria
     except Exception as e:
-        print(f"Error parsing criteria: {e}")
+        print(f"Error in extract_criteria_with_gpt4: {e}")
         return {}
 
 def categorize_score(score, row, test_type):
@@ -41,44 +48,41 @@ def categorize_score(score, row, test_type):
             return f"Below {quartile}th percentile"
     return "Above 75th percentile"
 
-def filter_by_distance(data, origin, max_distance):
+def filter_by_distance(data, place_distance_is_from, max_distance):
     geolocator = Nominatim(user_agent="school_locator")
-    location = geolocator.geocode(origin)
+    location = geolocator.geocode(place_distance_is_from)
     if not location:
+        print(f"Error: Unable to locate {place_distance_is_from}")
         return data
     
     origin_coords = (location.latitude, location.longitude)
 
     def calculate_distance(row):
-        school_coords = (row['latitude'], row['longitude'])
+        school_coords = (row['LATITUDE'], row['LONGITUDE'])
         return geodesic(origin_coords, school_coords).miles
 
-    data['distance'] = data.apply(calculate_distance, axis=1)
-    return data[data['distance'] <= max_distance]
+    data['Distance'] = data.apply(calculate_distance, axis=1)
+    return data[data['Distance'] <= max_distance]
 
 def filter_schools(criteria):
-    filtered_data = school_data
+    filtered_data = school_data.copy()
 
     if 'max_tuition' in criteria:
         filtered_data = filtered_data[filtered_data['tuition'] <= criteria['max_tuition']]
 
-    if 'religious_affiliation' in criteria and criteria['religious_affiliation']:
-        filtered_data = filtered_data[filtered_data['rel_affil'] != -2]
-    elif 'religious_affiliation' in criteria and not criteria['religious_affiliation']:
-        filtered_data = filtered_data[filtered_data['rel_affil'] == -2]
+    if 'religious_affiliation' in criteria:
+        if criteria['religious_affiliation']:
+            filtered_data = filtered_data[filtered_data['Religious_Affiliation'] != -2]
+        else:
+            filtered_data = filtered_data[filtered_data['Religious_Affiliation'] == -2]
 
     if 'math_sat' in criteria:
-        filtered_data['Math_SAT_Category'] = filtered_data.apply(lambda row: categorize_score(criteria['math_sat'], row, 'math_sat'), axis=1)
-    if 'reading_sat' in criteria:
-        filtered_data['Reading_SAT_Category'] = filtered_data.apply(lambda row: categorize_score(criteria['reading_sat'], row, 'reading_sat'), axis=1)
-
-    if 'math_sat' in criteria:
+        filtered_data['Math_SAT_Category'] = filtered_data.apply(lambda row: categorize_score(criteria['math_sat'], row, 'SAT_Math'), axis=1)
         filtered_data = filtered_data[filtered_data['Math_SAT_Category'] == 'Above 75th percentile']
+        
     if 'reading_sat' in criteria:
+        filtered_data['Reading_SAT_Category'] = filtered_data.apply(lambda row: categorize_score(criteria['reading_sat'], row, 'SAT_Reading'), axis=1)
         filtered_data = filtered_data[filtered_data['Reading_SAT_Category'] == 'Above 75th percentile']
-
-    if 'state' in criteria:
-        filtered_data = filtered_data[filtered_data['state'] == criteria['state']]
 
     if 'distance' in criteria and 'place_distance_is_from' in criteria:
         filtered_data = filter_by_distance(filtered_data, criteria['place_distance_is_from'], criteria['distance'])
@@ -86,8 +90,11 @@ def filter_schools(criteria):
     return filtered_data
 
 def generate_response(filtered_schools):
+    if not isinstance(filtered_schools, pd.DataFrame) or filtered_schools.empty:
+        return "No schools found matching the criteria."
+
     top_schools = filtered_schools.head(10)
-    school_names = top_schools['name'].tolist()
+    school_names = top_schools['School_Name'].tolist()
 
     response = f"Here are your top 10 choices for schools you are very likely to get into based on your criteria:\n"
     for i, school in enumerate(school_names, 1):
@@ -112,7 +119,9 @@ llm = LLMOpenAI(model="gpt-4o")
 agent = OpenAIAgent.from_tools(tools, llm=llm, verbose=True)
 
 # Example usage of agent communication
-prompt = "Given that my Math SAT is 530, my SAT reading is 480 and I wish to go to an academic university plus I can only afford up to $38,000 a year in tuition. I would prefer a religiously affiliated school in California within 50 miles of Santa Clara. Where are my top ten choices for schools I am very likely to get in to?"
+prompt = "Given that my Math SAT is 530, my SAT reading is 480 and I wish to go to an but I can only afford up to $68,000 a year in tuition. I would prefer a religiously affiliated school in California within 500 miles of Berkeley. Where are my top ten choices for schools I am very likely to get in to?"
 
-response = agent.chat(prompt)
+criteria = extract_criteria_with_gpt4(prompt)
+filtered_schools = filter_schools(criteria)
+response = generate_response(filtered_schools)
 print(response)
