@@ -125,3 +125,8 @@ criteria = extract_criteria_with_gpt4(prompt)
 filtered_schools = filter_schools(criteria)
 response = generate_response(filtered_schools)
 print(response)
+
+response =agent.chat("Hi")
+print(response)
+response =agent.chat("Given that my Math SAT is 530, my SAT reading is 480 and I wish to go to an but I can only afford up to $68,000 a year in tuition. I would prefer a religiously affiliated school in California within 500 miles of Berkeley. Where are my top ten choices for schools I am very likely to get in to?")
+print(response)
