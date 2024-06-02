@@ -96,7 +96,7 @@ def generate_response(filtered_schools):
     top_schools = filtered_schools.head(10)
     school_names = top_schools['School_Name'].tolist()
 
-    response = f"Here are your top 10 choices for schools you are very likely to get into based on your criteria:\n"
+    response = f"Here are 10 choices for schools you are very likely to get into based on your criteria:\n"
     for i, school in enumerate(school_names, 1):
         response += f"{i}. {school}\n"
 
@@ -119,7 +119,7 @@ llm = LLMOpenAI(model="gpt-4o")
 agent = OpenAIAgent.from_tools(tools, llm=llm, verbose=True)
 
 # Example usage of agent communication
-prompt = "Given that my Math SAT is 530, my SAT reading is 480 and I wish to go to an but I can only afford up to $68,000 a year in tuition. I would prefer a religiously affiliated school in California within 500 miles of Berkeley. Where are my top ten choices for schools I am very likely to get in to?"
+prompt = "Given that my Math SAT is 530, my SAT reading is 480 and I can only afford up to $68,000 a year in tuition. I would prefer a religiously affiliated school in California within 500 miles of Berkeley. Where are my top ten choices for schools I am very likely to get in to?"
 
 criteria = extract_criteria_with_gpt4(prompt)
 filtered_schools = filter_schools(criteria)
@@ -128,5 +128,5 @@ print(response)
 
 response =agent.chat("Hi")
 print(response)
-response =agent.chat("Given that my Math SAT is 530, my SAT reading is 480 and I wish to go to an but I can only afford up to $68,000 a year in tuition. I would prefer a religiously affiliated school in California within 500 miles of Berkeley. Where are my top ten choices for schools I am very likely to get in to?")
+response =agent.chat("Given that my Math SAT is 730, my SAT reading is 780 and I can only afford up to $68,000 a year in tuition. I would prefer a religiously affiliated school in California within 500 miles of Berkeley. Where are my top ten choices for schools I am very likely to get in to?")
 print(response)
